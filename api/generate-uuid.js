@@ -1,7 +1,23 @@
-// هذا هو الملف الموجود في: /api/generate-uuid.js
+// ================================================================
+// ✨ الكود الكامل والنهائي للخادم الخلفي (Backend) ✨
+// الملف: /api/functions.js
+// يحتوي على كل الدوال الحساسة التي تم نقلها من الواجهة الأمامية.
+// ================================================================
+
+const express = require('express');
+const cors = require('cors');
 const crypto = require('crypto');
 
-// --- الجزء السري الذي تم نقله إلى الخادم ---
+const app = express();
+
+// --- إعدادات الخادم الأساسية ---
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+
+
+// ================================================================
+// 🤫 1. الجزء السري الأول: دالة حساب الـ UUID
+// ================================================================
 const EtaUuid = (function() {
     async function sha256Hex(str) {
         const hash = crypto.createHash('sha256');
@@ -20,27 +36,109 @@ const EtaUuid = (function() {
     Serializer.prototype.emitScalar = function(lexeme) { this.out.push('"' + lexeme + '"'); }
     Serializer.prototype.serializeObject = function(path, exclude) { this.skip(); this.expect('{'); this.skip(); let first = true; while (this.i < this.n && this.s[this.i] !== '}') { if (!first) { if (this.s[this.i] === ',') { this.i++; this.skip(); } } const keyLex = this.readString(); const key = JSON.parse(keyLex); const K = key.toUpperCase(); this.skip(); this.expect(':'); this.skip(); const cur = path ? path + '.' + key : key; const ex = exclude.indexOf(cur) !== -1; const c = this.peek(); if (c === 0x22) { const v = this.readString(); if (!ex) { this.emitKey(K); this.emitScalar(v.slice(1, -1)); } } else if (c === 0x7B) { if (!ex) { this.emitKey(K); } this.serializeObject(cur, exclude); } else if (c === 0x5B) { if (!ex) { this.emitKey(K); } this.serializeArray(cur, exclude, ex, K); } else if ((c === 0x2D) || (c >= 0x30 && c <= 0x39)) { const num = this.readNumber(); if (!ex) { this.emitKey(K); this.emitScalar(num); } } else { const lit = this.readLiteral(); if (!ex) { this.emitKey(K); this.emitScalar(lit); } } this.skip(); first = false; } this.expect('}'); }
     Serializer.prototype.serializeArray = function(path, exclude, isExcluded, propNameUpper) { this.skip(); this.expect('['); this.skip(); let first = true; while (this.i < this.n && this.s[this.i] !== ']') { if (!first) { if (this.s[this.i] === ',') { this.i++; this.skip(); } } if (!isExcluded && propNameUpper) { this.emitKey(propNameUpper); } const c = this.peek(); if (c === 0x7B) { this.serializeObject(path, exclude); } else if (c === 0x22) { const v = this.readString(); if (!isExcluded) { this.emitScalar(v.slice(1, -1)); } } else if ((c === 0x2D) || (c >= 0x30 && c <= 0x39)) { const num = this.readNumber(); if (!isExcluded) { this.emitScalar(num); } } else { const lit = this.readLiteral(); if (!isExcluded) { this.emitScalar(lit); } } this.skip(); first = false; } this.expect(']'); }
-    function findFirstReceiptSlice(src) { const m = src.match(/"receipts"\s*:\s*\[/); if (!m) return src.trim(); let i = m.index + m[0].length; while (i < src.length && /\s/.test(src[i])) i++; if (src[i] !== '{') return src.trim(); let depth = 0, start = i; while (i < src.length) { const ch = src[i]; if (ch === '"') { i++; while (i < src.length) { if (src[i] === '\\') { i += 2; continue; } if (src[i] === '"') { i++; break; } i++; } continue; } if (ch === '{') { depth++; } if (ch === '}') { depth--; if (depth === 0) { i++; break; } } i++; } return src.slice(start, i); }
+    function findFirstReceiptSlice(src) { const m = src.match(/"(receipts|documents)"\s*:\s*\[/); if (!m) return src.trim(); let i = m.index + m[0].length; while (i < src.length && /\s/.test(src[i])) i++; if (src[i] !== '{') return src.trim(); let depth = 0, start = i; while (i < src.length) { const ch = src[i]; if (ch === '"') { i++; while (i < src.length) { if (src[i] === '\\') { i += 2; continue; } if (src[i] === '"') { i++; break; } i++; } continue; } if (ch === '{') { depth++; } if (ch === '}') { depth--; if (depth === 0) { i++; break; } } i++; } return src.slice(start, i); }
     function getCanonicalFromRawText(raw) { const slice = findFirstReceiptSlice(raw); const ser = new Serializer(slice); ser.serializeObject('', []); return ser.out.join(''); }
     async function computeUuidFromRawText(raw) { const canonical = getCanonicalFromRawText(raw); return await sha256Hex(canonical); }
-    return { computeUuidFromRawText };
+    return { computeUuidFromRawText, getCanonicalFromRawText };
 })();
-// --- نهاية الجزء السري ---
 
-export default async function handler(req, res) {
-    if (req.method !== 'POST') {
-        res.setHeader('Allow', ['POST']);
-        return res.status(405).end(`Method ${req.method} Not Allowed`);
+
+// ================================================================
+// 🤫 2. الجزء السري الثاني: دوال الاتصال بخادم مصلحة الضرائب
+// ================================================================
+const ETA_API_BASE_URL = "https://api-portal.invoicing.eta.gov.eg/api/v1";
+
+async function saveDraftToETA(invoicePayload, userToken ) {
+    if (!userToken) throw new Error("Authentication token is missing.");
+    const response = await fetch(`${ETA_API_BASE_URL}/documents/drafts`, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${userToken}` },
+        body: JSON.stringify(invoicePayload)
+    });
+    const responseData = await response.json();
+    if (!response.ok) {
+        const errorMessage = responseData.error?.details?.[0]?.message || responseData.error?.message || JSON.stringify(responseData);
+        throw new Error(errorMessage);
     }
-    try {
-        const rawText = req.body.payload;
-        if (!rawText) {
-            return res.status(400).json({ error: 'Payload is required' });
-        }
-        const uuid = await EtaUuid.computeUuidFromRawText(rawText);
-        res.status(200).json({ uuid: uuid });
-    } catch (error) {
-        console.error('Error generating UUID:', error);
-        res.status(500).json({ error: 'Failed to generate UUID', details: error.message });
-    }
+    return responseData;
 }
+
+async function updateDraftOnETA(draftId, payload, userToken) {
+    if (!userToken) throw new Error("Authentication token is missing.");
+    const response = await fetch(`${ETA_API_BASE_URL}/documents/drafts/${draftId}`, {
+        method: 'PUT',
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${userToken}` },
+        body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+        const errorData = await response.json();
+        const errorMessage = errorData.error?.details?.[0]?.message || errorData.error?.message || JSON.stringify(errorData);
+        throw new Error(errorMessage);
+    }
+    return await response.json();
+}
+
+
+// ================================================================
+// 🚀 3. نقاط النهاية (API Endpoints)
+// ================================================================
+
+// --- نقطة النهاية الأولى: لحساب الـ UUID ---
+app.post('/api/generate-uuid', async (req, res) => {
+    try {
+        const { payload } = req.body;
+        if (!payload) return res.status(400).json({ success: false, error: 'Payload is required' });
+        
+        const uuid = await EtaUuid.computeUuidFromRawText(payload);
+        res.status(200).json({ success: true, uuid: uuid });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to generate UUID', details: error.message });
+    }
+});
+
+// --- نقطة النهاية الثانية: لحساب النص المتسلسل (Canonical String) ---
+app.post('/api/canonicalize', (req, res) => {
+    try {
+        const { payload } = req.body;
+        if (!payload) return res.status(400).json({ success: false, error: 'Payload is required' });
+
+        const canonicalString = EtaUuid.getCanonicalFromRawText(payload);
+        res.status(200).json({ success: true, canonicalString: canonicalString });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to canonicalize payload', details: error.message });
+    }
+});
+
+
+// --- نقطة النهاية الثالثة: لحفظ الفاتورة كمسودة ---
+app.post('/api/save-draft', async (req, res) => {
+    try {
+        const { payload, token } = req.body;
+        if (!payload || !token) return res.status(400).json({ success: false, error: 'Payload and token are required.' });
+        
+        const result = await saveDraftToETA(payload, token);
+        res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to save draft', details: error.message });
+    }
+});
+
+// --- نقطة النهاية الرابعة: لتحديث مسودة موجودة ---
+app.put('/api/update-draft/:draftId', async (req, res) => {
+    try {
+        const { draftId } = req.params;
+        const { payload, token } = req.body;
+        if (!payload || !token || !draftId) return res.status(400).json({ success: false, error: 'Draft ID, payload, and token are required.' });
+
+        const result = await updateDraftOnETA(draftId, payload, token);
+        res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to update draft', details: error.message });
+    }
+});
+
+
+// ================================================================
+// ⚙️ تصدير التطبيق ليعمل على Vercel
+// ================================================================
+module.exports = app;
