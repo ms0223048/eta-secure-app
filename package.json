@@ -1,12 +1,10 @@
 {
-  "name": "eta-secure-app",
+  "name": "eta-secure-backend",
   "version": "1.0.0",
-  "description": "Secure ETA application with serverless functions.",
-  "main": "script.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC"
+  "description": "Secure serverless functions for ETA integration.",
+  "main": "api/generate-uuid.js",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  }
 }
