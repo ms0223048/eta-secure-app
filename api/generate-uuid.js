@@ -1,7 +1,6 @@
 // ================================================================
-// ✨ الكود الكامل والنهائي للخادم الخلفي ✨
-// الملف: /api/generate-uuid.js
-// يحتوي على دالة حساب UUID ودالة حفظ المسودات.
+// ✨ الكود الكامل والنهائي للخادم الخلفي (مع حل مشكلة CORS) ✨
+// الملف: /api/handler.js
 // ================================================================
 
 const express = require('express');
@@ -9,7 +8,14 @@ const cors = require('cors');
 const crypto = require('crypto');
 
 const app = express();
-app.use(cors());
+
+// ✅✅✅ إعدادات CORS للسماح بالاتصالات من الواجهة الأمامية ✅✅✅
+const corsOptions = {
+  origin: '*', // يسمح لجميع النطاقات. يمكنك تغييره لاحقاً لمزيد من الأمان.
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 
 // ================================================================
@@ -43,29 +49,23 @@ const EtaUuid = (function() {
 // 🤫 2. الجزء السري الثاني: دالة حفظ المسودات على خادم المصلحة
 // ================================================================
 async function saveDraftToETA(invoicePayload, userToken) {
-    if (!userToken) {
-        throw new Error("Authentication token is missing.");
-    }
+    if (!userToken) throw new Error("Authentication token is missing.");
     const ETA_DRAFTS_API_URL = "https://api-portal.invoicing.eta.gov.eg/api/v1/documents/drafts";
-    try {
-        const response = await fetch(ETA_DRAFTS_API_URL, {
-            method: 'POST',
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${userToken}` },
-            body: JSON.stringify(invoicePayload )
-        });
-        const responseData = await response.json();
-        if (!response.ok) {
-            const errorMessage = responseData.error?.details?.[0]?.message || responseData.error?.message || JSON.stringify(responseData);
-            throw new Error(errorMessage);
-        }
-        return responseData;
-    } catch (error) {
-        throw error;
+    const response = await fetch(ETA_DRAFTS_API_URL, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${userToken}` },
+        body: JSON.stringify(invoicePayload )
+    });
+    const responseData = await response.json();
+    if (!response.ok) {
+        const errorMessage = responseData.error?.details?.[0]?.message || responseData.error?.message || JSON.stringify(responseData);
+        throw new Error(errorMessage);
     }
+    return responseData;
 }
 
 // ================================================================
-// 🚀 3. نقاط النهاية (API Endpoints) التي ستتصل بها الواجهة الأمامية
+// 🚀 3. نقاط النهاية (API Endpoints)
 // ================================================================
 
 // --- نقطة النهاية الأولى: لحساب الـ UUID ---
